@@ -1,5 +1,5 @@
 const mongoose = require('../database/db.js');
-const user = require('../models/user');
+const user = require('./user');
 
 const Schema = new mongoose.Schema({
   creator: String,
@@ -35,7 +35,7 @@ const polling = mongoose.model('polling', Schema);
  */
 const startPolling = async (userId, subject, pollingEndTime, placeMode, multichoice, options, relatedUsersInfo) => {
   var pollingId;
-  await polling.create({
+  var doc = await polling.create({
      creator: userId,
      subject: subject,
      pollingEndTime: pollingEndTime,
@@ -43,10 +43,9 @@ const startPolling = async (userId, subject, pollingEndTime, placeMode, multicho
      multichoice: multichoice,
      options: options,
      relatedUsersInfo: relatedUsersInfo
-   }).then( (doc) => {
-     pollingId = doc._id;
-     user.addCreatedPollingsToUser([pollingId], userId);
    });
+   pollingId = doc._id;
+   await user.addCreatedPollingsToUser([pollingId], userId);
    return pollingId;
 }
 
@@ -70,8 +69,11 @@ const deletePolling = async (userId, pollingId) => {
  * @param   {Array of Objects} options - options add to the polling
  */
 const addOptions = async (pollingId, options) => {
-  options.forEach((item,index) => {
-    polling.updateOne({'_id': pollingId, 'options.content': {$ne: item.content}}, {$push:{options: item}}).exec();
+  return new Promise((resolve, reject) => {
+    options.forEach( async (item, index, array) => {
+      await polling.updateOne({'_id': pollingId, 'options.content': {$ne: item.content}}, {$push:{options: item}}).exec();
+      if(index === array.length-1) resolve();
+    });
   });
 }
 
@@ -82,11 +84,14 @@ const addOptions = async (pollingId, options) => {
  * @param   {Array of String} newContents - new contents that changed to.
  */
 const updateOptions = async (pollingId, oldContents, newContents) => {
-  newContents.forEach( async (item, index) => {
-    var exist = await polling.exists({'_id': pollingId, 'options.content':item});
-    if(!exist) {
-      await polling.updateOne({'_id': pollingId, 'options.content': oldContents[index]}, {$set:{'options.$.content': item}}).exec();
-    }
+  return new Promise((resolve, reject) => {
+    newContents.forEach( async (item, index, array) => {
+      var exist = await polling.exists({'_id': pollingId, 'options.content':item});
+      if(!exist) {
+        await polling.updateOne({'_id': pollingId, 'options.content': oldContents[index]}, {$set:{'options.$.content': item}}).exec();
+      }
+      if(index === array.length-1) resolve();
+    });
   });
 }
 
@@ -96,9 +101,12 @@ const updateOptions = async (pollingId, oldContents, newContents) => {
  * @param   {Array of String} oldContents - old contents to specify options.
  */
 const deleteOptions = async (pollingId, oldContents) => {
-  oldContents.forEach(async (item, index) => {
-    await polling.updateOne({'_id': pollingId, 'options.content': item}, {$set: {'options.$': ''}}).exec();
-    await polling.updateOne({'_id': pollingId}, {$pull: {options: ''}}).exec();
+  return new Promise((resolve, reject) => {
+    oldContents.forEach( async (item, index, array) => {
+      await polling.updateOne({'_id': pollingId, 'options.content': item}, {$set: {'options.$': ''}}).exec();
+      await polling.updateOne({'_id': pollingId}, {$pull: {options: ''}}).exec();
+      if(index === array.length-1) resolve();
+    });
   });
 }
 
@@ -109,8 +117,11 @@ const deleteOptions = async (pollingId, oldContents) => {
  * @param   {Array of Number} contents - contents to specify which options to vote.
  */
 const voteOptions = async (userId, pollingId, contents) => {
-  contents.forEach((item, index) => {
-    polling.updateOne({'_id': pollingId, 'options.content': item}, {$addToSet: {'options.$.votedUser': userId}}).exec();
+  return new Promise((resolve, reject) => {
+    contents.forEach( async (item, index, array) => {
+      await polling.updateOne({'_id': pollingId, 'options.content': item}, {$addToSet: {'options.$.votedUser': userId}}).exec();
+      if(index === array.length-1) resolve();
+    });
   });
 }
 
@@ -120,9 +131,21 @@ const voteOptions = async (userId, pollingId, contents) => {
  * @param   {Array of Object} relatedUsersInfo - related user Infos for the polling.
  */
 const addUsersInfo = async (pollingId, relatedUsersInfo) => {
-  relatedUsersInfo.forEach((item,index) => {
-    polling.updateOne({'_id': pollingId, 'relatedUsersInfo.userId': {$ne: item.userId}}, {$push:{relatedUsersInfo:item}}).exec();
+  return new Promise((resolve, reject) => {
+    relatedUsersInfo.forEach( async (item, index, array) => {
+      await polling.updateOne({'_id': pollingId, 'relatedUsersInfo.userId': {$ne: item.userId}}, {$push:{relatedUsersInfo:item}}).exec();
+      if(index === array.length-1) resolve();
+    });
   });
+}
+
+/**
+ * deleteUsersInfo - delete related user Infos for corresponding users to specific polling.
+ * @param   {String} pollingId - which polling.
+ * @param   {Array of String} userIds - which users to delete user infos for the polling.
+ */
+const deleteUsersInfo = async (pollingId, userIds) => {
+    await polling.updateOne({'_id': pollingId}, {$pull: {'relatedUsersInfo': {'userId': {$in: userIds}}}}).exec();
 }
 
 /**
@@ -133,9 +156,12 @@ const addUsersInfo = async (pollingId, relatedUsersInfo) => {
  * @param   {Array of Date} availableTimes - what availableTimeTos for those users to change.
  */
 const changeAvaliableTimes = async (pollingId, userIds, availableTimeFroms, availableTimeTos) => {
-  userIds.forEach((item, index) => {
-    polling.updateOne({'_id': pollingId, 'relatedUsersInfo.userId': item},
-    {$set:{'relatedUsersInfo.$.availableTimeFrom': availableTimeFroms[index], 'relatedUsersInfo.$.availableTimeTo': availableTimeTos[index]}}).exec();
+  return new Promise((resolve, reject) => {
+    userIds.forEach( async (item, index, array) => {
+      await polling.updateOne({'_id': pollingId, 'relatedUsersInfo.userId': item},
+      {$set:{'relatedUsersInfo.$.availableTimeFrom': availableTimeFroms[index], 'relatedUsersInfo.$.availableTimeTo': availableTimeTos[index]}}).exec();
+      if(index === array.length-1) resolve();
+    });
   });
 }
 
@@ -146,28 +172,22 @@ const changeAvaliableTimes = async (pollingId, userIds, availableTimeFroms, avai
  * @param   {Array of String} startPoints - what start points for those users to change.
  */
 const changeStartPoints = async (pollingId, userIds, startPoints) => {
-  userIds.forEach((item, index) => {
-    polling.updateOne({'_id': pollingId, 'relatedUsersInfo.userId': item}, {$set:{'relatedUsersInfo.$.startPoint': startPoints[index]}}).exec();
+  return new Promise((resolve, reject) => {
+    userIds.forEach( async (item, index, array) => {
+      await polling.updateOne({'_id': pollingId, 'relatedUsersInfo.userId': item}, {$set:{'relatedUsersInfo.$.startPoint': startPoints[index]}}).exec();
+      if(index === array.length-1) resolve();
+    });
   });
-}
-
-/**
- * deleteUsersInfo - delete related user Infos for corresponding users to specific polling.
- * @param   {String} pollingId - which polling.
- * @param   {Array of String} userIds - which users to delete user infos for the polling.
- */
-const deleteUsersInfo = async (pollingId, userIds) => {
-    await polling.updateOne({'_id': pollingId}, {$pull: {'relatedUsersInfo': {'userId': {$in: userIds} } } }).exec();
 }
 
 module.exports = polling;
 module.exports.startPolling = startPolling;
+module.exports.deletePolling = deletePolling;
 module.exports.addOptions = addOptions;
 module.exports.updateOptions = updateOptions;
 module.exports.deleteOptions = deleteOptions;
 module.exports.voteOptions = voteOptions;
 module.exports.addUsersInfo = addUsersInfo;
+module.exports.deleteUsersInfo = deleteUsersInfo;
 module.exports.changeAvaliableTimes = changeAvaliableTimes;
 module.exports.changeStartPoints = changeStartPoints;
-module.exports.deleteUsersInfo = deleteUsersInfo;
-module.exports.deletePolling = deletePolling;
